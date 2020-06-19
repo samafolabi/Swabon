@@ -1,0 +1,45 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    xmlns:tools="http://schemas.android.com/tools"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:orientation="vertical"
+    android:padding="24dp"
+    tools:context=".HomeActivity">
+
+    <TextView
+        android:id="@+id/swabot_intro"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:text="Hey, I'm Swabot"
+        android:textColor="@android:color/black"
+        android:textSize="36sp" />
+
+    <TextView
+        android:id="@+id/assist_intro"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:text="Your personal assistance during this Covid-19 Pandemic"
+        android:textSize="24sp" />
+
+    <Button
+        android:id="@+id/started"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:background="@color/colorPrimary"
+        android:onClick="getStarted"
+        android:text="@string/get_started"
+        android:textAllCaps="false"
+        android:textColor="@android:color/white" />
+
+    <Button
+        android:id="@+id/terms"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:background="@android:color/white"
+        android:text="@string/terms"
+        android:textAllCaps="false"
+        android:textColor="@color/colorPrimary" />
+
+</LinearLayout>
