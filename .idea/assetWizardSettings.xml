@@ -33,7 +33,9 @@
                                   </option>
                                   <option name="values">
                                     <map>
-                                      <entry key="outputName" value="ic_search" />
+                                      <entry key="assetType" value="IMAGE" />
+                                      <entry key="imageAsset" value="C:\Users\emper\Downloads\swabon-01 (1).png" />
+                                      <entry key="outputName" value="swabon" />
                                     </map>
                                   </option>
                                 </PersistentState>

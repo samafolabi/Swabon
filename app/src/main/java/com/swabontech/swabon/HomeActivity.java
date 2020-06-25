@@ -4,8 +4,10 @@ import androidx.appcompat.app.AlertDialog;
 import androidx.appcompat.app.AppCompatActivity;
 
 import android.content.DialogInterface;
+import android.content.Intent;
 import android.content.SharedPreferences;
 import android.os.Bundle;
+import android.util.Log;
 import android.view.View;
 import android.widget.EditText;
 
@@ -17,6 +19,11 @@ public class HomeActivity extends AppCompatActivity {
         setContentView(R.layout.activity_home);
 
 
+    }
+
+    private void startMainActivity() {
+        Intent i = new Intent(this, MainActivity.class);
+        startActivity(i);
     }
 
     public void getStarted(View view) {
@@ -31,10 +38,13 @@ public class HomeActivity extends AppCompatActivity {
         alert.setPositiveButton("Confirm", new DialogInterface.OnClickListener() {
             public void onClick(DialogInterface dialog, int whichButton) {
                 if (!input.getText().toString().isEmpty()) {
-                    SharedPreferences sharedPref = getPreferences(MODE_PRIVATE);
+                    SharedPreferences sharedPref = getSharedPreferences("SWABON", MODE_PRIVATE);
                     SharedPreferences.Editor editor = sharedPref.edit();
                     editor.putString("device_code", input.getText().toString());
+                    Log.e("swabon", input.getText().toString());
                     editor.commit();
+
+                    startMainActivity();
                 }
             }
         });

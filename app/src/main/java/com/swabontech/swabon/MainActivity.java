@@ -4,25 +4,40 @@ import androidx.annotation.NonNull;
 import androidx.appcompat.app.AppCompatActivity;
 import androidx.appcompat.widget.SearchView;
 import androidx.appcompat.widget.Toolbar;
+import androidx.core.app.ActivityCompat;
+import androidx.core.app.NotificationCompat;
+import androidx.core.app.NotificationManagerCompat;
+import androidx.core.content.ContextCompat;
 import androidx.fragment.app.FragmentActivity;
 
 import android.Manifest;
+import android.app.NotificationChannel;
+import android.app.NotificationManager;
 import android.app.PendingIntent;
 import android.app.SearchManager;
+import android.content.BroadcastReceiver;
 import android.content.Context;
 import android.content.Intent;
 import android.content.SharedPreferences;
 import android.content.pm.PackageManager;
 import android.graphics.Color;
+import android.location.Criteria;
 import android.location.Location;
+import android.location.LocationListener;
+import android.location.LocationManager;
+import android.os.Build;
 import android.os.Bundle;
+import android.util.Log;
 import android.view.Menu;
 import android.view.MenuInflater;
 import android.view.MenuItem;
+import android.widget.Toast;
 
 import com.google.android.gms.location.FusedLocationProviderClient;
 import com.google.android.gms.location.Geofence;
+import com.google.android.gms.location.GeofenceStatusCodes;
 import com.google.android.gms.location.GeofencingClient;
+import com.google.android.gms.location.GeofencingEvent;
 import com.google.android.gms.location.GeofencingRequest;
 import com.google.android.gms.location.LocationServices;
 import com.google.android.gms.maps.CameraUpdateFactory;
@@ -42,16 +57,19 @@ import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 
-public class MainActivity extends AppCompatActivity implements OnMapReadyCallback {
+public class MainActivity extends AppCompatActivity implements OnMapReadyCallback, LocationListener {
 
     private GoogleMap mMap;
     private FusedLocationProviderClient locClient;
     private Location l;
+    private LocationManager lm;
     private GeofencingClient geo;
     private List<Circle> cs;
     private List<Geofence> gs;
 
     private PendingIntent geofencePendingIntent;
+
+    private final int LOCATION_CODE = 100;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -61,17 +79,21 @@ public class MainActivity extends AppCompatActivity implements OnMapReadyCallbac
         Toolbar myToolbar = (Toolbar) findViewById(R.id.my_toolbar);
         setSupportActionBar(myToolbar);
 
-        search(getIntent());
-
-        SharedPreferences pref = getPreferences(MODE_PRIVATE);
+        SharedPreferences pref = getSharedPreferences("SWABON", MODE_PRIVATE);
         String code = pref.getString("device_code", "");
         if (code.isEmpty()) {
+            Log.e("swabon", "empty");
             Intent i = new Intent(this, HomeActivity.class);
             startActivity(i);
         }
 
         locClient = LocationServices.getFusedLocationProviderClient(this);
         geo = LocationServices.getGeofencingClient(this);
+
+        //checkPermission(Manifest.permission.ACCESS_FINE_LOCATION, LOCATION_CODE);
+        getLocation(true);
+
+        search(getIntent());
 
         // Obtain the SupportMapFragment and get notified when the map is ready to be used.
         SupportMapFragment mapFragment = (SupportMapFragment) getSupportFragmentManager()
@@ -106,36 +128,24 @@ public class MainActivity extends AppCompatActivity implements OnMapReadyCallbac
     public void onMapReady(GoogleMap googleMap) {
         mMap = googleMap;
 
-        if (checkSelfPermission(Manifest.permission.ACCESS_FINE_LOCATION) != PackageManager.PERMISSION_GRANTED
-                && checkSelfPermission(Manifest.permission.ACCESS_COARSE_LOCATION) != PackageManager.PERMISSION_GRANTED) {
-            // TODO: Consider calling
-            //    Activity#requestPermissions
-            // here to request the missing permissions, and then overriding
-            //   public void onRequestPermissionsResult(int requestCode, String[] permissions,
-            //                                          int[] grantResults)
-            // to handle the case where the user grants the permission. See the documentation
-            // for Activity#requestPermissions for more details.
-            return;
-        }
-        locClient.getLastLocation().addOnSuccessListener(this, new OnSuccessListener<Location>() {
-            @Override
-            public void onSuccess(Location location) {
-                l = location;
-            }
-        });
+        //checkPermission(Manifest.permission.ACCESS_FINE_LOCATION, LOCATION_CODE);
+        getLocation(true);
         moveMap();
     }
 
     private void moveMap() {
         LatLng current = new LatLng(l.getLatitude(), l.getLongitude());
         mMap.moveCamera(CameraUpdateFactory.newLatLng(current));
-        setupZones();
+        mMap.moveCamera(CameraUpdateFactory.zoomTo(18.0f));
+        //setupZones();
     }
 
     private void setupZones() {
         //Get zones within a five mile radius
         char types[] = {};
         CircleOptions l[] = {};
+        cs.clear();
+        gs.clear();
 
         for (int i = 0; i < l.length; i++) {
             createZone(types[i], l[i]);
@@ -239,6 +249,125 @@ public class MainActivity extends AppCompatActivity implements OnMapReadyCallbac
                 // Invoke the superclass to handle it.
                 return super.onOptionsItemSelected(item);
 
+        }
+    }
+
+    private void getLocation(boolean b) {
+        lm = (LocationManager)  this.getSystemService(Context.LOCATION_SERVICE);
+        Criteria criteria = new Criteria();
+        String bestProvider = String.valueOf(lm.getBestProvider(criteria, true)).toString();
+
+        //You can still do this if you like, you might get lucky:
+        l = lm.getLastKnownLocation(bestProvider);
+        if (l != null) {
+            Log.e("TAG", "GPS is on");
+        }
+        else{
+            lm.requestLocationUpdates(bestProvider, 1000, 0, this);
+        }
+
+        Log.e("swabon", l.getLatitude() + " " + l.getLongitude());
+
+    }
+
+    @Override
+    public void onLocationChanged(Location location) {
+        //Hey, a non null location! Sweet!
+
+        //remove location callback:
+        lm.removeUpdates(this);
+    }
+
+    @Override
+    public void onStatusChanged(String provider, int status, Bundle extras) {
+
+    }
+
+    @Override
+    public void onProviderEnabled(String provider) {
+
+    }
+
+    @Override
+    public void onProviderDisabled(String provider) {
+
+    }
+
+    class GeofenceBroadcastReceiver extends BroadcastReceiver {
+
+        int notificationId = 0;
+
+        @Override
+        public void onReceive(Context context, Intent intent) {
+            GeofencingEvent geofencingEvent = GeofencingEvent.fromIntent(intent);
+            if (geofencingEvent.hasError()) {
+                String errorMessage = GeofenceStatusCodes.getStatusCodeString(geofencingEvent.getErrorCode());
+                Toast.makeText(context, errorMessage, Toast.LENGTH_SHORT).show();
+                return;
+            }
+
+            // Get the transition type.
+            int geofenceTransition = geofencingEvent.getGeofenceTransition();
+
+            // Test that the reported transition was of interest.
+            if (geofenceTransition == Geofence.GEOFENCE_TRANSITION_ENTER ||
+                    geofenceTransition == Geofence.GEOFENCE_TRANSITION_EXIT) {
+
+                // Get the geofences that were triggered. A single event can trigger
+                // multiple geofences.
+                List<Geofence> triggeringGeofences = geofencingEvent.getTriggeringGeofences();
+
+                // Get the transition details as a String.
+            /*String geofenceTransitionDetails = getGeofenceTransitionDetails(
+                    this,
+                    geofenceTransition,
+                    triggeringGeofences
+            );*/
+
+                // Send notification and log the transition details.
+                //sendNotification(geofenceTransitionDetails);
+            } else {
+                // Log the error.
+                //Log.e(TAG, getString(R.string.geofence_transition_invalid_type,
+                //geofenceTransition));
+            }
+        }
+
+        private void createNotificationChannel() {
+            // Create the NotificationChannel, but only on API 26+ because
+            // the NotificationChannel class is new and not in the support library
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                CharSequence name = "Zone Entry Notifications";
+                String description = "Notify when you enter a new zone and give tips";
+                int importance = NotificationManager.IMPORTANCE_DEFAULT;
+                NotificationChannel channel = new NotificationChannel("swabon_notifications_01", name, importance);
+                channel.setDescription(description);
+                // Register the channel with the system; you can't change the importance
+                // or other notification behaviors after this
+                NotificationManager notificationManager = getSystemService(NotificationManager.class);
+                notificationManager.createNotificationChannel(channel);
+            }
+        }
+
+        private void sendNotification() {
+            // Create an explicit intent for an Activity in your app
+            Intent intent = new Intent(getApplicationContext(), MainActivity.class);
+            intent.setFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_CLEAR_TASK);
+            PendingIntent pendingIntent = PendingIntent.getActivity(getApplicationContext(), 0, intent, 0);
+
+            NotificationCompat.Builder builder = new NotificationCompat.Builder(getApplicationContext(), "swabon_notifications_01")
+                    .setSmallIcon(R.drawable.swabon)
+                    .setContentTitle("My notification")
+                    .setContentText("Hello World!")
+                    .setPriority(NotificationCompat.PRIORITY_DEFAULT)
+                    // Set the intent that will fire when the user taps the notification
+                    .setContentIntent(pendingIntent)
+                    .setAutoCancel(true);
+
+            NotificationManagerCompat notificationManager = NotificationManagerCompat.from(getApplicationContext());
+
+            // notificationId is a unique int for each notification that you must define
+            notificationManager.notify(notificationId++, builder.build());
         }
     }
 }
