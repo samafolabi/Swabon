@@ -1,6 +1,7 @@
 package com.swabontech.swabon;
 
 import androidx.annotation.NonNull;
+import androidx.annotation.Nullable;
 import androidx.appcompat.app.AppCompatActivity;
 import androidx.appcompat.widget.SearchView;
 import androidx.appcompat.widget.Toolbar;
@@ -33,6 +34,7 @@ import android.view.MenuInflater;
 import android.view.MenuItem;
 import android.widget.Toast;
 
+import com.google.android.gms.common.api.Status;
 import com.google.android.gms.location.FusedLocationProviderClient;
 import com.google.android.gms.location.Geofence;
 import com.google.android.gms.location.GeofenceStatusCodes;
@@ -52,8 +54,15 @@ import com.google.android.gms.maps.model.Polygon;
 import com.google.android.gms.maps.model.PolygonOptions;
 import com.google.android.gms.tasks.OnFailureListener;
 import com.google.android.gms.tasks.OnSuccessListener;
+import com.google.android.libraries.places.api.Places;
+import com.google.android.libraries.places.api.model.Place;
+import com.google.android.libraries.places.api.net.PlacesClient;
+import com.google.android.libraries.places.widget.Autocomplete;
+import com.google.android.libraries.places.widget.AutocompleteActivity;
+import com.google.android.libraries.places.widget.model.AutocompleteActivityMode;
 
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.HashMap;
 import java.util.List;
 
@@ -66,10 +75,13 @@ public class MainActivity extends AppCompatActivity implements OnMapReadyCallbac
     private GeofencingClient geo;
     private List<Circle> cs;
     private List<Geofence> gs;
+    private PlacesClient placesClient;
 
     private PendingIntent geofencePendingIntent;
 
     private final int LOCATION_CODE = 100;
+    private final int AUTOCOMPLETE_REQUEST_CODE = 1;
+    private boolean lSet = false;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -90,29 +102,15 @@ public class MainActivity extends AppCompatActivity implements OnMapReadyCallbac
         locClient = LocationServices.getFusedLocationProviderClient(this);
         geo = LocationServices.getGeofencingClient(this);
 
-        //checkPermission(Manifest.permission.ACCESS_FINE_LOCATION, LOCATION_CODE);
-        getLocation(true);
-
-        search(getIntent());
+        // Initialize the SDK
+        Places.initialize(getApplicationContext(), getString(R.string.google_maps_key));
+        // Create a new Places client instance
+        placesClient = Places.createClient(this);
 
         // Obtain the SupportMapFragment and get notified when the map is ready to be used.
         SupportMapFragment mapFragment = (SupportMapFragment) getSupportFragmentManager()
                 .findFragmentById(R.id.map);
         mapFragment.getMapAsync(this);
-    }
-
-    @Override
-    protected void onNewIntent(Intent intent) {
-        search(intent);
-        super.onNewIntent(intent);
-    }
-
-    private void search(Intent intent) {
-        if (Intent.ACTION_SEARCH.equals(intent.getAction())) {
-            String query = intent.getStringExtra(SearchManager.QUERY);
-            //change l
-            moveMap();
-        }
     }
 
     /**
@@ -127,10 +125,7 @@ public class MainActivity extends AppCompatActivity implements OnMapReadyCallbac
     @Override
     public void onMapReady(GoogleMap googleMap) {
         mMap = googleMap;
-
-        //checkPermission(Manifest.permission.ACCESS_FINE_LOCATION, LOCATION_CODE);
-        getLocation(true);
-        moveMap();
+        getCurrentLocation();
     }
 
     private void moveMap() {
@@ -222,13 +217,6 @@ public class MainActivity extends AppCompatActivity implements OnMapReadyCallbac
         MenuInflater inflater = getMenuInflater();
         inflater.inflate(R.menu.map, menu);
 
-        SearchManager searchManager =
-                (SearchManager) getSystemService(Context.SEARCH_SERVICE);
-        SearchView searchView =
-                (SearchView) menu.findItem(R.id.search).getActionView();
-        searchView.setSearchableInfo(
-                searchManager.getSearchableInfo(getComponentName()));
-
         return true;
     }
 
@@ -236,7 +224,12 @@ public class MainActivity extends AppCompatActivity implements OnMapReadyCallbac
     public boolean onOptionsItemSelected(MenuItem item) {
         switch (item.getItemId()) {
             case R.id.search:
-                // User chose the "Settings" item, show the app settings UI...
+                List<Place.Field> fields = Arrays.asList(Place.Field.ID, Place.Field.NAME, Place.Field.ADDRESS, Place.Field.LAT_LNG);
+
+                Intent intent = new Autocomplete.IntentBuilder(
+                        AutocompleteActivityMode.OVERLAY, fields)
+                        .build(this);
+                startActivityForResult(intent, AUTOCOMPLETE_REQUEST_CODE);
                 return true;
 
             case R.id.settings:
@@ -252,22 +245,38 @@ public class MainActivity extends AppCompatActivity implements OnMapReadyCallbac
         }
     }
 
-    private void getLocation(boolean b) {
+    private void getCurrentLocation() {
         lm = (LocationManager)  this.getSystemService(Context.LOCATION_SERVICE);
         Criteria criteria = new Criteria();
         String bestProvider = String.valueOf(lm.getBestProvider(criteria, true)).toString();
 
         //You can still do this if you like, you might get lucky:
-        l = lm.getLastKnownLocation(bestProvider);
-        if (l != null) {
-            Log.e("TAG", "GPS is on");
+        Location loc = lm.getLastKnownLocation(bestProvider);
+        if (loc != null) {
+            setLocation(loc);
         }
         else{
             lm.requestLocationUpdates(bestProvider, 1000, 0, this);
         }
+    }
 
-        Log.e("swabon", l.getLatitude() + " " + l.getLongitude());
-
+    @Override
+    protected void onActivityResult(int requestCode, int resultCode, @Nullable Intent data) {
+        if (requestCode == AUTOCOMPLETE_REQUEST_CODE) {
+            if (resultCode == RESULT_OK) {
+                Place place = Autocomplete.getPlaceFromIntent(data);
+                Toast.makeText(this, "Place: " + place.getName() + ", " + place.getId(), Toast.LENGTH_LONG).show();
+                l.setLatitude(place.getLatLng().latitude);
+                l.setLongitude(place.getLatLng().longitude);
+                moveMap();
+            } else if (resultCode == AutocompleteActivity.RESULT_ERROR) {
+                // TODO: Handle the error.
+                Status status = Autocomplete.getStatusFromIntent(data);
+                Log.e("Swabon", status.getStatusMessage());
+            } else if (resultCode == RESULT_CANCELED) {
+                // The user canceled the operation.
+            }
+        }
     }
 
     @Override
@@ -275,7 +284,18 @@ public class MainActivity extends AppCompatActivity implements OnMapReadyCallbac
         //Hey, a non null location! Sweet!
 
         //remove location callback:
-        lm.removeUpdates(this);
+        if (lm != null) {
+            lm.removeUpdates(this);
+            setLocation(location);
+        }
+    }
+
+    private void setLocation(Location loc) {
+        lSet = true;
+        l = loc;
+        Log.e("swabon", "GPS is on");
+        Log.e("swabon", l.getLatitude() + " " + l.getLongitude());
+        moveMap();
     }
 
     @Override
@@ -293,7 +313,7 @@ public class MainActivity extends AppCompatActivity implements OnMapReadyCallbac
 
     }
 
-    class GeofenceBroadcastReceiver extends BroadcastReceiver {
+    public class GeofenceBroadcastReceiver extends BroadcastReceiver {
 
         int notificationId = 0;
 
