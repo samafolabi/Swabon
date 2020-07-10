@@ -1,0 +1,11 @@
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    package="com.swabontech.swabon">
+
+    <!--Change Settings-Editor-Inspection-Android Lint-Using system app permission to error-->
+    <uses-permission android:name="android.permission.ACCESS_MOCK_LOCATION" />
+
+    <application>
+
+    </application>
+
+</manifest>

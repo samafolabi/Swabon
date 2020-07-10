@@ -26,8 +26,11 @@ import android.location.Criteria;
 import android.location.Location;
 import android.location.LocationListener;
 import android.location.LocationManager;
+import android.location.LocationProvider;
 import android.os.Build;
 import android.os.Bundle;
+import android.os.Looper;
+import android.os.SystemClock;
 import android.util.Log;
 import android.view.Menu;
 import android.view.MenuInflater;
@@ -41,6 +44,9 @@ import com.google.android.gms.location.GeofenceStatusCodes;
 import com.google.android.gms.location.GeofencingClient;
 import com.google.android.gms.location.GeofencingEvent;
 import com.google.android.gms.location.GeofencingRequest;
+import com.google.android.gms.location.LocationCallback;
+import com.google.android.gms.location.LocationRequest;
+import com.google.android.gms.location.LocationResult;
 import com.google.android.gms.location.LocationServices;
 import com.google.android.gms.maps.CameraUpdateFactory;
 import com.google.android.gms.maps.GoogleMap;
@@ -70,11 +76,11 @@ public class MainActivity extends AppCompatActivity implements OnMapReadyCallbac
 
     private GoogleMap mMap;
     private FusedLocationProviderClient locClient;
+    private LocationCallback locationCallback;
     private Location l;
     private LocationManager lm;
     private GeofencingClient geo;
-    private List<Circle> cs;
-    private List<Geofence> gs;
+    private List<Geofence> gs = new ArrayList<>();
     private PlacesClient placesClient;
 
     private PendingIntent geofencePendingIntent;
@@ -82,6 +88,7 @@ public class MainActivity extends AppCompatActivity implements OnMapReadyCallbac
     private final int LOCATION_CODE = 100;
     private final int AUTOCOMPLETE_REQUEST_CODE = 1;
     private boolean lSet = false;
+    boolean yy = true;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -101,16 +108,43 @@ public class MainActivity extends AppCompatActivity implements OnMapReadyCallbac
 
         locClient = LocationServices.getFusedLocationProviderClient(this);
         geo = LocationServices.getGeofencingClient(this);
+        locationCallback = new LocationCallback() {
+            @Override
+            public void onLocationResult(LocationResult locationResult) {
+                if (locationResult == null) {
+                    return;
+                }
+                l = locationResult.getLocations().get(0);
+            }
+        };
 
         // Initialize the SDK
         Places.initialize(getApplicationContext(), getString(R.string.google_maps_key));
         // Create a new Places client instance
         placesClient = Places.createClient(this);
 
+        createNotificationChannel();
+
         // Obtain the SupportMapFragment and get notified when the map is ready to be used.
         SupportMapFragment mapFragment = (SupportMapFragment) getSupportFragmentManager()
                 .findFragmentById(R.id.map);
         mapFragment.getMapAsync(this);
+    }
+
+    public void createNotificationChannel() {
+        // Create the NotificationChannel, but only on API 26+ because
+        // the NotificationChannel class is new and not in the support library
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            CharSequence name = "Zone Entry Notifications";
+            String description = "Notify when you enter a new zone and give tips";
+            int importance = NotificationManager.IMPORTANCE_DEFAULT;
+            NotificationChannel channel = new NotificationChannel("swabon_notifications_01", name, importance);
+            channel.setDescription(description);
+            // Register the channel with the system; you can't change the importance
+            // or other notification behaviors after this
+            NotificationManager notificationManager = getSystemService(NotificationManager.class);
+            notificationManager.createNotificationChannel(channel);
+        }
     }
 
     /**
@@ -128,22 +162,43 @@ public class MainActivity extends AppCompatActivity implements OnMapReadyCallbac
         getCurrentLocation();
     }
 
-    private void moveMap() {
+    private void moveMap(boolean x) {
         LatLng current = new LatLng(l.getLatitude(), l.getLongitude());
         mMap.moveCamera(CameraUpdateFactory.newLatLng(current));
         mMap.moveCamera(CameraUpdateFactory.zoomTo(18.0f));
-        //setupZones();
+        if  (x) {
+            mMap.clear();
+        }
+        mMap.addMarker(new MarkerOptions().position(new LatLng(l.getLatitude(), l.getLongitude())).title("Current"));
+        if  (x) {
+            setupZones();
+        }
+    }
+
+    private LatLng translate(double lat, double lon, double metersX, double metersY) {
+        metersX /= 1000;
+        metersY /= 1000;
+        LatLng x = new LatLng(lat+(metersY/111.111), lon+(metersX/(111.111 * Math.cos(lat))));
+        Log.e("swabon", lat + " " + lon + " " + x.latitude + " " + x.longitude);
+        return x;
     }
 
     private void setupZones() {
         //Get zones within a five mile radius
-        char types[] = {};
-        CircleOptions l[] = {};
-        cs.clear();
+
+        //currently example zones
+        char types[] = {0,1,2};
+        CircleOptions c1 = new CircleOptions().center(translate(l.getLatitude(),l.getLongitude(),100,100))
+                .radius(100);
+        CircleOptions c2 = new CircleOptions().center(translate(l.getLatitude(),l.getLongitude(),100,-100))
+                .radius(100);
+        CircleOptions c3 = new CircleOptions().center(translate(l.getLatitude(),l.getLongitude(),-100,0))
+                .radius(100);
+        CircleOptions c[] = {c1,c2,c3};
         gs.clear();
 
-        for (int i = 0; i < l.length; i++) {
-            createZone(types[i], l[i]);
+        for (int i = 0; i < c.length; i++) {
+            createZone(types[i], c[i]);
         }
         if (checkSelfPermission(Manifest.permission.ACCESS_FINE_LOCATION) != PackageManager.PERMISSION_GRANTED) {
             return;
@@ -154,6 +209,7 @@ public class MainActivity extends AppCompatActivity implements OnMapReadyCallbac
                     public void onSuccess(Void aVoid) {
                         // Geofences added
                         // ...
+                        Toast.makeText(MainActivity.this, "Geos made", Toast.LENGTH_SHORT).show();
                     }
                 })
                 .addOnFailureListener(this, new OnFailureListener() {
@@ -169,32 +225,34 @@ public class MainActivity extends AppCompatActivity implements OnMapReadyCallbac
         int col;
         switch (type) {
             case 0:
-                col = Color.RED;
+                col = Color.argb(100, 0, 255, 0);
                 break;
             case 1:
-                col = Color.GREEN;
+                col = Color.argb(100, 0, 255, 255);
                 break;
             case 2:
-                col = Color.YELLOW;
+                col = Color.argb(100, 255, 0, 0);
                 break;
             default:
                 col = Color.BLACK;
         }
-        Circle c = mMap.addCircle(o.fillColor(col));
-        cs.add(c);
+        mMap.addCircle(o.fillColor(col).strokeWidth(0));
         gs.add(new Geofence.Builder()
-                .setRequestId(""+type+gs.size())
-                .setCircularRegion(c.getCenter().latitude,
-                                    c.getCenter().longitude,
-                            (float) c.getRadius())
+                .setRequestId(Integer.toString(type)+Integer.toString(gs.size()))
+                .setCircularRegion(o.getCenter().latitude,
+                                    o.getCenter().longitude,
+                            (float) o.getRadius())
                 .setTransitionTypes(Geofence.GEOFENCE_TRANSITION_ENTER
                             | Geofence.GEOFENCE_TRANSITION_EXIT)
+                .setExpirationDuration(Geofence.NEVER_EXPIRE)
+                .setLoiteringDelay(10000)
                 .build());
     }
 
     private GeofencingRequest getGeofencingRequest() {
         GeofencingRequest.Builder b = new GeofencingRequest.Builder();
-        b.setInitialTrigger(GeofencingRequest.INITIAL_TRIGGER_DWELL);
+        b.setInitialTrigger(GeofencingRequest.INITIAL_TRIGGER_ENTER|GeofencingRequest.INITIAL_TRIGGER_DWELL);
+
         b.addGeofences(gs);
         return b.build();
     }
@@ -235,6 +293,12 @@ public class MainActivity extends AppCompatActivity implements OnMapReadyCallbac
             case R.id.settings:
                 // User chose the "Favorite" action, mark the current item
                 // as a favorite...
+                if (yy) {
+                    setMock(50.3709, -4.1317, true);
+                } else {
+                    setMock(50.3714883, -4.132739, true);
+                }
+                yy = !yy;
                 return true;
 
             default:
@@ -249,6 +313,9 @@ public class MainActivity extends AppCompatActivity implements OnMapReadyCallbac
         lm = (LocationManager)  this.getSystemService(Context.LOCATION_SERVICE);
         Criteria criteria = new Criteria();
         String bestProvider = String.valueOf(lm.getBestProvider(criteria, true)).toString();
+
+
+        setMock(50.3714883, -4.132739, false);
 
         //You can still do this if you like, you might get lucky:
         Location loc = lm.getLastKnownLocation(bestProvider);
@@ -268,7 +335,7 @@ public class MainActivity extends AppCompatActivity implements OnMapReadyCallbac
                 Toast.makeText(this, "Place: " + place.getName() + ", " + place.getId(), Toast.LENGTH_LONG).show();
                 l.setLatitude(place.getLatLng().latitude);
                 l.setLongitude(place.getLatLng().longitude);
-                moveMap();
+                moveMap(true);
             } else if (resultCode == AutocompleteActivity.RESULT_ERROR) {
                 // TODO: Handle the error.
                 Status status = Autocomplete.getStatusFromIntent(data);
@@ -285,7 +352,7 @@ public class MainActivity extends AppCompatActivity implements OnMapReadyCallbac
 
         //remove location callback:
         if (lm != null) {
-            lm.removeUpdates(this);
+            //lm.removeUpdates(this);
             setLocation(location);
         }
     }
@@ -295,7 +362,59 @@ public class MainActivity extends AppCompatActivity implements OnMapReadyCallbac
         l = loc;
         Log.e("swabon", "GPS is on");
         Log.e("swabon", l.getLatitude() + " " + l.getLongitude());
-        moveMap();
+
+        /*LocationRequest locationRequest = LocationRequest.create();
+        locationRequest.setInterval(10000);
+        locationRequest.setFastestInterval(5000);
+        locationRequest.setPriority(LocationRequest.PRIORITY_HIGH_ACCURACY);
+
+        locClient.requestLocationUpdates(locationRequest,
+                locationCallback,
+                Looper.getMainLooper());*/
+
+
+        moveMap(true);
+    }
+
+    private void setMock(double latitude, double longitude, boolean x) {
+        lm.addTestProvider(LocationManager.GPS_PROVIDER,
+                "requiresNetwork" == "",
+                "requiresSatellite" == "",
+                "requiresCell" == "",
+                "hasMonetaryCost" == "",
+                "supportsAltitude" == "",
+                "supportsSpeed" == "",
+                "supportsBearing" == "",
+                android.location.Criteria.POWER_LOW,
+                android.location.Criteria.ACCURACY_FINE);
+
+        Location newLocation = new Location(LocationManager.GPS_PROVIDER);
+
+        if (x) {
+            l.setLatitude(latitude);
+            l.setLongitude(longitude);
+        }
+
+        newLocation.setLatitude(latitude);
+        newLocation.setLongitude(longitude);
+        newLocation.setAltitude(0);
+        newLocation.setAccuracy(500);
+        newLocation.setTime(System.currentTimeMillis());
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.JELLY_BEAN_MR1) {
+            newLocation.setElapsedRealtimeNanos(SystemClock.elapsedRealtimeNanos());
+        }
+        lm.setTestProviderEnabled(LocationManager.GPS_PROVIDER, true);
+
+        lm.setTestProviderStatus(LocationManager.GPS_PROVIDER,
+                LocationProvider.AVAILABLE,
+                null,System.currentTimeMillis());
+
+        lm.setTestProviderLocation(LocationManager.GPS_PROVIDER, newLocation);
+        lm.setTestProviderLocation(LocationManager.GPS_PROVIDER, newLocation);
+        lm.setTestProviderLocation(LocationManager.GPS_PROVIDER, newLocation);
+
+        if (x)
+        moveMap(false);
     }
 
     @Override
@@ -311,83 +430,5 @@ public class MainActivity extends AppCompatActivity implements OnMapReadyCallbac
     @Override
     public void onProviderDisabled(String provider) {
 
-    }
-
-    public class GeofenceBroadcastReceiver extends BroadcastReceiver {
-
-        int notificationId = 0;
-
-        @Override
-        public void onReceive(Context context, Intent intent) {
-            GeofencingEvent geofencingEvent = GeofencingEvent.fromIntent(intent);
-            if (geofencingEvent.hasError()) {
-                String errorMessage = GeofenceStatusCodes.getStatusCodeString(geofencingEvent.getErrorCode());
-                Toast.makeText(context, errorMessage, Toast.LENGTH_SHORT).show();
-                return;
-            }
-
-            // Get the transition type.
-            int geofenceTransition = geofencingEvent.getGeofenceTransition();
-
-            // Test that the reported transition was of interest.
-            if (geofenceTransition == Geofence.GEOFENCE_TRANSITION_ENTER ||
-                    geofenceTransition == Geofence.GEOFENCE_TRANSITION_EXIT) {
-
-                // Get the geofences that were triggered. A single event can trigger
-                // multiple geofences.
-                List<Geofence> triggeringGeofences = geofencingEvent.getTriggeringGeofences();
-
-                // Get the transition details as a String.
-            /*String geofenceTransitionDetails = getGeofenceTransitionDetails(
-                    this,
-                    geofenceTransition,
-                    triggeringGeofences
-            );*/
-
-                // Send notification and log the transition details.
-                //sendNotification(geofenceTransitionDetails);
-            } else {
-                // Log the error.
-                //Log.e(TAG, getString(R.string.geofence_transition_invalid_type,
-                //geofenceTransition));
-            }
-        }
-
-        private void createNotificationChannel() {
-            // Create the NotificationChannel, but only on API 26+ because
-            // the NotificationChannel class is new and not in the support library
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                CharSequence name = "Zone Entry Notifications";
-                String description = "Notify when you enter a new zone and give tips";
-                int importance = NotificationManager.IMPORTANCE_DEFAULT;
-                NotificationChannel channel = new NotificationChannel("swabon_notifications_01", name, importance);
-                channel.setDescription(description);
-                // Register the channel with the system; you can't change the importance
-                // or other notification behaviors after this
-                NotificationManager notificationManager = getSystemService(NotificationManager.class);
-                notificationManager.createNotificationChannel(channel);
-            }
-        }
-
-        private void sendNotification() {
-            // Create an explicit intent for an Activity in your app
-            Intent intent = new Intent(getApplicationContext(), MainActivity.class);
-            intent.setFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_CLEAR_TASK);
-            PendingIntent pendingIntent = PendingIntent.getActivity(getApplicationContext(), 0, intent, 0);
-
-            NotificationCompat.Builder builder = new NotificationCompat.Builder(getApplicationContext(), "swabon_notifications_01")
-                    .setSmallIcon(R.drawable.swabon)
-                    .setContentTitle("My notification")
-                    .setContentText("Hello World!")
-                    .setPriority(NotificationCompat.PRIORITY_DEFAULT)
-                    // Set the intent that will fire when the user taps the notification
-                    .setContentIntent(pendingIntent)
-                    .setAutoCancel(true);
-
-            NotificationManagerCompat notificationManager = NotificationManagerCompat.from(getApplicationContext());
-
-            // notificationId is a unique int for each notification that you must define
-            notificationManager.notify(notificationId++, builder.build());
-        }
     }
 }
