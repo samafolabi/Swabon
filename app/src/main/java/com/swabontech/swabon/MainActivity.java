@@ -106,29 +106,60 @@ public class MainActivity extends AppCompatActivity implements OnMapReadyCallbac
             startActivity(i);
         }
 
-        locClient = LocationServices.getFusedLocationProviderClient(this);
-        geo = LocationServices.getGeofencingClient(this);
-        locationCallback = new LocationCallback() {
-            @Override
-            public void onLocationResult(LocationResult locationResult) {
-                if (locationResult == null) {
-                    return;
-                }
-                l = locationResult.getLocations().get(0);
-            }
-        };
-
-        // Initialize the SDK
-        Places.initialize(getApplicationContext(), getString(R.string.google_maps_key));
-        // Create a new Places client instance
-        placesClient = Places.createClient(this);
-
         createNotificationChannel();
 
         // Obtain the SupportMapFragment and get notified when the map is ready to be used.
         SupportMapFragment mapFragment = (SupportMapFragment) getSupportFragmentManager()
                 .findFragmentById(R.id.map);
         mapFragment.getMapAsync(this);
+    }
+
+    private void checkPermission() {
+
+        int permission = ContextCompat.checkSelfPermission(this,
+                Manifest.permission.ACCESS_FINE_LOCATION);
+
+        if (permission != PackageManager.PERMISSION_GRANTED) {
+            Log.e("swabon", "Permission denied");
+            makeRequest();
+        } else {
+            locClient = LocationServices.getFusedLocationProviderClient(this);
+            geo = LocationServices.getGeofencingClient(this);
+            locationCallback = new LocationCallback() {
+                @Override
+                public void onLocationResult(LocationResult locationResult) {
+                    if (locationResult == null) {
+                        return;
+                    }
+                    l = locationResult.getLocations().get(0);
+                }
+            };
+
+            // Initialize the SDK
+            Places.initialize(getApplicationContext(), getString(R.string.google_maps_key));
+            // Create a new Places client instance
+            placesClient = Places.createClient(this);
+
+            getCurrentLocation();
+        }
+    }
+
+    protected void makeRequest() {
+        ActivityCompat.requestPermissions(this,
+                new String[]{Manifest.permission.ACCESS_FINE_LOCATION},
+                LOCATION_CODE);
+    }
+
+    @Override
+    public void onRequestPermissionsResult(int requestCode, String permissions[], int[] grantResults) {
+        if (requestCode == LOCATION_CODE) {
+            if (grantResults.length == 0 || grantResults[0] != PackageManager.PERMISSION_GRANTED) {
+                Log.e("swabon", "Permission has been denied by user");
+            } else {
+                Log.e("swabon", "Permission has been granted by user");
+                getCurrentLocation();
+            }
+        }
     }
 
     public void createNotificationChannel() {
@@ -159,7 +190,7 @@ public class MainActivity extends AppCompatActivity implements OnMapReadyCallbac
     @Override
     public void onMapReady(GoogleMap googleMap) {
         mMap = googleMap;
-        getCurrentLocation();
+        checkPermission();
     }
 
     private void moveMap(boolean x) {
@@ -294,9 +325,9 @@ public class MainActivity extends AppCompatActivity implements OnMapReadyCallbac
                 // User chose the "Favorite" action, mark the current item
                 // as a favorite...
                 if (yy) {
-                    setMock(50.3709, -4.1317, true);
+                    //setMock(50.3709, -4.1317, true);
                 } else {
-                    setMock(50.3714883, -4.132739, true);
+                    //setMock(50.3714883, -4.132739, true);
                 }
                 yy = !yy;
                 return true;
@@ -315,7 +346,7 @@ public class MainActivity extends AppCompatActivity implements OnMapReadyCallbac
         String bestProvider = String.valueOf(lm.getBestProvider(criteria, true)).toString();
 
 
-        setMock(50.3714883, -4.132739, false);
+        //setMock(50.3714883, -4.132739, false);
 
         //You can still do this if you like, you might get lucky:
         Location loc = lm.getLastKnownLocation(bestProvider);
