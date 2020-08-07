@@ -72,23 +72,29 @@ import java.util.Arrays;
 import java.util.HashMap;
 import java.util.List;
 
-public class MainActivity extends AppCompatActivity implements OnMapReadyCallback, LocationListener {
+public class MainActivity extends AppCompatActivity implements OnMapReadyCallback {
+
+    /*
+    * Check if in zone
+    * Notifications
+    * In background location change
+    * Get within 5 mile radius
+    * Settings and Terms of Use (and remove first page from page stack)
+    * Pretty design
+    * Pretty code
+    * */
 
     private GoogleMap mMap;
     private FusedLocationProviderClient locClient;
     private LocationCallback locationCallback;
     private Location l;
-    private LocationManager lm;
-    private GeofencingClient geo;
-    private List<Geofence> gs = new ArrayList<>();
     private PlacesClient placesClient;
-
-    private PendingIntent geofencePendingIntent;
 
     private final int LOCATION_CODE = 100;
     private final int AUTOCOMPLETE_REQUEST_CODE = 1;
-    private boolean lSet = false;
     boolean yy = true;
+    int notificationId = 0;
+    int currentZone = -1;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -123,23 +129,6 @@ public class MainActivity extends AppCompatActivity implements OnMapReadyCallbac
             Log.e("swabon", "Permission denied");
             makeRequest();
         } else {
-            locClient = LocationServices.getFusedLocationProviderClient(this);
-            geo = LocationServices.getGeofencingClient(this);
-            locationCallback = new LocationCallback() {
-                @Override
-                public void onLocationResult(LocationResult locationResult) {
-                    if (locationResult == null) {
-                        return;
-                    }
-                    l = locationResult.getLocations().get(0);
-                }
-            };
-
-            // Initialize the SDK
-            Places.initialize(getApplicationContext(), getString(R.string.google_maps_key));
-            // Create a new Places client instance
-            placesClient = Places.createClient(this);
-
             getCurrentLocation();
         }
     }
@@ -214,52 +203,90 @@ public class MainActivity extends AppCompatActivity implements OnMapReadyCallbac
         return x;
     }
 
+
+
     private void setupZones() {
-        //Get zones within a five mile radius
+        //Get zones within a five mile radius, should be closer zones first
 
         //currently example zones
-        char types[] = {0,1,2};
-        CircleOptions c1 = new CircleOptions().center(translate(l.getLatitude(),l.getLongitude(),100,100))
-                .radius(100);
-        CircleOptions c2 = new CircleOptions().center(translate(l.getLatitude(),l.getLongitude(),100,-100))
-                .radius(100);
-        CircleOptions c3 = new CircleOptions().center(translate(l.getLatitude(),l.getLongitude(),-100,0))
-                .radius(100);
-        CircleOptions c[] = {c1,c2,c3};
-        gs.clear();
+        List<Integer> types = new ArrayList<>();
+        types.add(0);
+        types.add(1);
+        if (!yy)
+            types.add(2);
 
-        for (int i = 0; i < c.length; i++) {
-            createZone(types[i], c[i]);
+        List<CircleOptions> c = new ArrayList<>();
+        c.add(new CircleOptions().center(translate(l.getLatitude(),l.getLongitude(),100,100))
+                .radius(100));
+        c.add(new CircleOptions().center(translate(l.getLatitude(),l.getLongitude(),200,-200))
+                .radius(100));
+        if (!yy)
+            c.add(new CircleOptions().center(translate(l.getLatitude(),l.getLongitude(),-100,0)).radius(100));
+
+        for (int i = 0; i < c.size(); i++) {
+            createZone(types.get(i), c.get(i));
         }
         if (checkSelfPermission(Manifest.permission.ACCESS_FINE_LOCATION) != PackageManager.PERMISSION_GRANTED) {
             return;
         }
-        geo.addGeofences(getGeofencingRequest(), getGeofencePendingIntent())
-                .addOnSuccessListener(this, new OnSuccessListener<Void>() {
-                    @Override
-                    public void onSuccess(Void aVoid) {
-                        // Geofences added
-                        // ...
-                        Toast.makeText(MainActivity.this, "Geos made", Toast.LENGTH_SHORT).show();
-                    }
-                })
-                .addOnFailureListener(this, new OnFailureListener() {
-                    @Override
-                    public void onFailure(@NonNull Exception e) {
-                        // Failed to add geofences
-                        // ...
-                    }
-                });
+
+        //Check if marker is zone
+        //First, get indexes of all 2s, 1s, and 0s. Test 2s first and see if in zone. If it is, raise notif, if not move on
+        List<Integer> twos = new ArrayList<>();
+        List<Integer> ones = new ArrayList<>();
+        List<Integer> zeros = new ArrayList<>();
+        for (int i = 0; i < types.size(); i++) {
+            switch (types.get(i)) {
+                case 2:
+                    twos.add(i);
+                    break;
+                case 1:
+                    ones.add(i);
+                    break;
+                case 0:
+                    zeros.add(i);
+                    break;
+                default:
+                    zeros.add(i);
+            }
+        }
+
+        boolean x = true;
+        int type = 0;
+        for (int two : twos) { if (inside(c.get(two))) { type = 2; x = false; break; } }
+        for (int one : ones) { if (x && inside(c.get(one))) { type = 1; x =  false; break; } }
+        for (int zero : zeros) { if (x && inside(c.get(zero))) { type = 0; break; } }
+
+        Log.e("Swabon", ""+type);
+
+        if (type != currentZone) {
+            currentZone = type;
+            String text = "";
+            switch (type) {
+                case 2:
+                    text = "You're in a hot zone so make sure you're covered up and don't spend to long there";
+                    break;
+                case 1:
+                    text = "You're in an intermediate zone so make sure you have a mask and hand sanitizer";
+                    break;
+                case 0:
+                default:
+                    text = "You're in a safe zone but still be careful";
+                    break;
+            }
+
+            sendNotification(text);
+        }
     }
 
-    private void createZone(char type, CircleOptions o) {
+    private void createZone(int type, CircleOptions o) {
         int col;
         switch (type) {
             case 0:
                 col = Color.argb(100, 0, 255, 0);
                 break;
             case 1:
-                col = Color.argb(100, 0, 255, 255);
+                col = Color.argb(100, 0, 0, 255);
                 break;
             case 2:
                 col = Color.argb(100, 255, 0, 0);
@@ -268,37 +295,38 @@ public class MainActivity extends AppCompatActivity implements OnMapReadyCallbac
                 col = Color.BLACK;
         }
         mMap.addCircle(o.fillColor(col).strokeWidth(0));
-        gs.add(new Geofence.Builder()
-                .setRequestId(Integer.toString(type)+Integer.toString(gs.size()))
-                .setCircularRegion(o.getCenter().latitude,
-                                    o.getCenter().longitude,
-                            (float) o.getRadius())
-                .setTransitionTypes(Geofence.GEOFENCE_TRANSITION_ENTER
-                            | Geofence.GEOFENCE_TRANSITION_EXIT)
-                .setExpirationDuration(Geofence.NEVER_EXPIRE)
-                .setLoiteringDelay(10000)
-                .build());
     }
 
-    private GeofencingRequest getGeofencingRequest() {
-        GeofencingRequest.Builder b = new GeofencingRequest.Builder();
-        b.setInitialTrigger(GeofencingRequest.INITIAL_TRIGGER_ENTER|GeofencingRequest.INITIAL_TRIGGER_DWELL);
+    private boolean inside(CircleOptions centerPoint) {
+        //radius is in meters and this function is in km
+        double rad = centerPoint.getRadius()/1000;
 
-        b.addGeofences(gs);
-        return b.build();
+        double ky = 40000 / 360;
+        double kx = Math.cos(Math.PI * centerPoint.getCenter().latitude / 180.0) * ky;
+        double dx = Math.abs(centerPoint.getCenter().longitude - l.getLongitude()) * kx;
+        double dy = Math.abs(centerPoint.getCenter().latitude - l.getLatitude()) * ky;
+        return Math.sqrt(dx * dx + dy * dy) <= rad;
     }
 
-    private PendingIntent getGeofencePendingIntent() {
-        // Reuse the PendingIntent if we already have it.
-        if (geofencePendingIntent != null) {
-            return geofencePendingIntent;
-        }
-        Intent intent = new Intent(this, GeofenceBroadcastReceiver.class);
-        // We use FLAG_UPDATE_CURRENT so that we get the same pending intent back when
-        // calling addGeofences() and removeGeofences().
-        geofencePendingIntent = PendingIntent.getBroadcast(this, 0, intent, PendingIntent.
-                FLAG_UPDATE_CURRENT);
-        return geofencePendingIntent;
+    public void sendNotification(String text) {
+        // Create an explicit intent for an Activity in your app
+        Intent intent = new Intent(this, MainActivity.class);
+        intent.setFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_CLEAR_TASK);
+        PendingIntent pendingIntent = PendingIntent.getActivity(this, 0, intent, 0);
+
+        NotificationCompat.Builder builder = new NotificationCompat.Builder(this, "swabon_notifications_01")
+                .setSmallIcon(R.drawable.swabon)
+                .setContentTitle("New Zone")
+                .setContentText(text)
+                .setPriority(NotificationCompat.PRIORITY_DEFAULT)
+                // Set the intent that will fire when the user taps the notification
+                .setContentIntent(pendingIntent)
+                .setAutoCancel(true);
+
+        NotificationManagerCompat notificationManager = NotificationManagerCompat.from(this);
+
+        // notificationId is a unique int for each notification that you must define
+        notificationManager.notify(notificationId++, builder.build());
     }
 
     @Override
@@ -324,12 +352,9 @@ public class MainActivity extends AppCompatActivity implements OnMapReadyCallbac
             case R.id.settings:
                 // User chose the "Favorite" action, mark the current item
                 // as a favorite...
-                if (yy) {
-                    //setMock(50.3709, -4.1317, true);
-                } else {
-                    //setMock(50.3714883, -4.132739, true);
-                }
-                yy = !yy;
+                yy = false;
+
+
                 return true;
 
             default:
@@ -341,7 +366,49 @@ public class MainActivity extends AppCompatActivity implements OnMapReadyCallbac
     }
 
     private void getCurrentLocation() {
-        lm = (LocationManager)  this.getSystemService(Context.LOCATION_SERVICE);
+        locClient = LocationServices.getFusedLocationProviderClient(this);
+
+        locationCallback = new LocationCallback() {
+            @Override
+            public void onLocationResult(LocationResult locationResult) {
+                if (locationResult == null) {
+                    Log.e("Swabon", "No location from update");
+                    Toast.makeText(MainActivity.this, "No location from update", Toast.LENGTH_SHORT).show();
+                    return;
+                }
+                setLocation(locationResult.getLocations().get(0));
+            }
+        };
+
+        // Initialize the SDK
+        Places.initialize(getApplicationContext(), getString(R.string.google_maps_key));
+        // Create a new Places client instance
+        placesClient = Places.createClient(this);
+
+        LocationRequest locationRequest = LocationRequest.create();
+        locationRequest.setInterval(300000);
+        locationRequest.setFastestInterval(10000);
+        locationRequest.setPriority(LocationRequest.PRIORITY_HIGH_ACCURACY);
+        locClient.requestLocationUpdates(locationRequest,
+                locationCallback,
+                Looper.getMainLooper());
+
+        locClient.getLastLocation()
+                .addOnSuccessListener(this, new OnSuccessListener<Location>() {
+                    @Override
+                    public void onSuccess(Location location) {
+                        // Got last known location. In some rare situations this can be null.
+                        Log.e("Swabon", "No location");
+                        if (location != null) {
+                            // Logic to handle location object
+                            setLocation(location);
+                        }
+                    }
+                });
+
+
+
+        /*lm = (LocationManager)  this.getSystemService(Context.LOCATION_SERVICE);
         Criteria criteria = new Criteria();
         String bestProvider = String.valueOf(lm.getBestProvider(criteria, true)).toString();
 
@@ -355,7 +422,7 @@ public class MainActivity extends AppCompatActivity implements OnMapReadyCallbac
         }
         else{
             lm.requestLocationUpdates(bestProvider, 1000, 0, this);
-        }
+        }*/
     }
 
     @Override
@@ -364,9 +431,7 @@ public class MainActivity extends AppCompatActivity implements OnMapReadyCallbac
             if (resultCode == RESULT_OK) {
                 Place place = Autocomplete.getPlaceFromIntent(data);
                 Toast.makeText(this, "Place: " + place.getName() + ", " + place.getId(), Toast.LENGTH_LONG).show();
-                l.setLatitude(place.getLatLng().latitude);
-                l.setLongitude(place.getLatLng().longitude);
-                moveMap(true);
+                setLocation(place.getLatLng().latitude, place.getLatLng().longitude);
             } else if (resultCode == AutocompleteActivity.RESULT_ERROR) {
                 // TODO: Handle the error.
                 Status status = Autocomplete.getStatusFromIntent(data);
@@ -377,37 +442,24 @@ public class MainActivity extends AppCompatActivity implements OnMapReadyCallbac
         }
     }
 
-    @Override
-    public void onLocationChanged(Location location) {
-        //Hey, a non null location! Sweet!
-
-        //remove location callback:
-        if (lm != null) {
-            //lm.removeUpdates(this);
-            setLocation(location);
-        }
-    }
-
     private void setLocation(Location loc) {
-        lSet = true;
         l = loc;
         Log.e("swabon", "GPS is on");
         Log.e("swabon", l.getLatitude() + " " + l.getLongitude());
 
-        /*LocationRequest locationRequest = LocationRequest.create();
-        locationRequest.setInterval(10000);
-        locationRequest.setFastestInterval(5000);
-        locationRequest.setPriority(LocationRequest.PRIORITY_HIGH_ACCURACY);
+        moveMap(true);
+    }
 
-        locClient.requestLocationUpdates(locationRequest,
-                locationCallback,
-                Looper.getMainLooper());*/
-
+    private void setLocation(double lat, double lon) {
+        l.setLatitude(lat);
+        l.setLongitude(lon);
+        Log.e("swabon", "GPS is on");
+        Log.e("swabon", lat + " " + lon);
 
         moveMap(true);
     }
 
-    private void setMock(double latitude, double longitude, boolean x) {
+    /*private void setMock(double latitude, double longitude, boolean x) {
         lm.addTestProvider(LocationManager.GPS_PROVIDER,
                 "requiresNetwork" == "",
                 "requiresSatellite" == "",
@@ -446,20 +498,5 @@ public class MainActivity extends AppCompatActivity implements OnMapReadyCallbac
 
         if (x)
         moveMap(false);
-    }
-
-    @Override
-    public void onStatusChanged(String provider, int status, Bundle extras) {
-
-    }
-
-    @Override
-    public void onProviderEnabled(String provider) {
-
-    }
-
-    @Override
-    public void onProviderDisabled(String provider) {
-
-    }
+    }*/
 }
