@@ -17,8 +17,10 @@ import android.app.NotificationManager;
 import android.app.PendingIntent;
 import android.app.SearchManager;
 import android.content.BroadcastReceiver;
+import android.content.ComponentName;
 import android.content.Context;
 import android.content.Intent;
+import android.content.ServiceConnection;
 import android.content.SharedPreferences;
 import android.content.pm.PackageManager;
 import android.graphics.Color;
@@ -29,6 +31,7 @@ import android.location.LocationManager;
 import android.location.LocationProvider;
 import android.os.Build;
 import android.os.Bundle;
+import android.os.IBinder;
 import android.os.Looper;
 import android.os.SystemClock;
 import android.util.Log;
@@ -37,6 +40,8 @@ import android.view.MenuInflater;
 import android.view.MenuItem;
 import android.widget.Toast;
 
+import com.google.android.gms.common.ConnectionResult;
+import com.google.android.gms.common.GoogleApiAvailability;
 import com.google.android.gms.common.api.Status;
 import com.google.android.gms.location.FusedLocationProviderClient;
 import com.google.android.gms.location.Geofence;
@@ -67,6 +72,10 @@ import com.google.android.libraries.places.widget.Autocomplete;
 import com.google.android.libraries.places.widget.AutocompleteActivity;
 import com.google.android.libraries.places.widget.model.AutocompleteActivityMode;
 
+import org.greenrobot.eventbus.EventBus;
+import org.greenrobot.eventbus.Subscribe;
+import org.greenrobot.eventbus.ThreadMode;
+
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.HashMap;
@@ -75,10 +84,22 @@ import java.util.List;
 public class MainActivity extends AppCompatActivity implements OnMapReadyCallback {
 
     /*
-    * Check if in zone
-    * Notifications
-    * In background location change
+
+    initmap (what happens when you move map)
+    walking around (5 mile get, who hosts geofences, how to update geofences)
+    request permissions nice-ities
+    background location
+    improve inside function algorithm
+    perseistent notif?
+    locationstoppedevent
+    edit covid initial code
+    what to do when app is closed, make sure service is running
+
+
+
+
     * Get within 5 mile radius
+    search
     * Settings and Terms of Use (and remove first page from page stack)
     * Pretty design
     * Pretty code
@@ -88,13 +109,37 @@ public class MainActivity extends AppCompatActivity implements OnMapReadyCallbac
     private FusedLocationProviderClient locClient;
     private LocationCallback locationCallback;
     private Location l;
-    private PlacesClient placesClient;
+    boolean requestingLocationUpdates = false;
+    LocationRequest locationRequest;
+    String REQUESTING_LOCATION_UPDATES_KEY = "keykeybaby";
 
     private final int LOCATION_CODE = 100;
     private final int AUTOCOMPLETE_REQUEST_CODE = 1;
-    boolean yy = true;
     int notificationId = 0;
     int currentZone = -1;
+    public static final String TAG = "swabon";
+    LocationUpdateService mService;
+    boolean startUpdates = false;
+    boolean initMap = false;
+    boolean permissionChecked = false;
+
+    class Zone {
+        int type;
+        double latitude;
+        double longitude;
+        int radius;
+
+        public Zone (int t, double lat, double lon, int r) {
+            type = t;
+            latitude = lat;
+            longitude = lon;
+            radius = r;
+        }
+    }
+
+    ArrayList<Zone> testZones = new ArrayList<Zone>();
+
+
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -112,24 +157,32 @@ public class MainActivity extends AppCompatActivity implements OnMapReadyCallbac
             startActivity(i);
         }
 
-        createNotificationChannel();
+        testZones.add(new Zone(0, 40.401425000900005, -79.85945313317994100, 100));
+        testZones.add(new Zone(1, 40.3996249991, -79.85945313317994,100));
+        testZones.add(new Zone(2, 40.400525, -79.8584583,100));
+
+        Intent intent = new Intent(this, LocationUpdateService.class);
+        startService(intent);
 
         // Obtain the SupportMapFragment and get notified when the map is ready to be used.
         SupportMapFragment mapFragment = (SupportMapFragment) getSupportFragmentManager()
                 .findFragmentById(R.id.map);
         mapFragment.getMapAsync(this);
+
+        //updateValuesFromBundle(savedInstanceState);
     }
 
-    private void checkPermission() {
 
+    private void checkPermission() {
         int permission = ContextCompat.checkSelfPermission(this,
                 Manifest.permission.ACCESS_FINE_LOCATION);
+        permissionChecked = true;
 
         if (permission != PackageManager.PERMISSION_GRANTED) {
             Log.e("swabon", "Permission denied");
             makeRequest();
         } else {
-            getCurrentLocation();
+            if (!startUpdates) startUpdates = true;
         }
     }
 
@@ -146,26 +199,14 @@ public class MainActivity extends AppCompatActivity implements OnMapReadyCallbac
                 Log.e("swabon", "Permission has been denied by user");
             } else {
                 Log.e("swabon", "Permission has been granted by user");
-                getCurrentLocation();
+                if (permissionChecked)
+                    if (!startUpdates) startUpdates = true;
             }
         }
     }
 
-    public void createNotificationChannel() {
-        // Create the NotificationChannel, but only on API 26+ because
-        // the NotificationChannel class is new and not in the support library
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            CharSequence name = "Zone Entry Notifications";
-            String description = "Notify when you enter a new zone and give tips";
-            int importance = NotificationManager.IMPORTANCE_DEFAULT;
-            NotificationChannel channel = new NotificationChannel("swabon_notifications_01", name, importance);
-            channel.setDescription(description);
-            // Register the channel with the system; you can't change the importance
-            // or other notification behaviors after this
-            NotificationManager notificationManager = getSystemService(NotificationManager.class);
-            notificationManager.createNotificationChannel(channel);
-        }
-    }
+
+
 
     /**
      * Manipulates the map once available.
@@ -182,49 +223,22 @@ public class MainActivity extends AppCompatActivity implements OnMapReadyCallbac
         checkPermission();
     }
 
-    private void moveMap(boolean x) {
+    private void moveMap() {
+        //l = mService.getCurrentLocation();
+        mMap.clear();
         LatLng current = new LatLng(l.getLatitude(), l.getLongitude());
-        mMap.moveCamera(CameraUpdateFactory.newLatLng(current));
         mMap.moveCamera(CameraUpdateFactory.zoomTo(18.0f));
-        if  (x) {
-            mMap.clear();
-        }
-        mMap.addMarker(new MarkerOptions().position(new LatLng(l.getLatitude(), l.getLongitude())).title("Current"));
-        if  (x) {
-            setupZones();
-        }
+        mMap.addMarker(new MarkerOptions().position(current).title("Current"));
+        mMap.moveCamera(CameraUpdateFactory.newLatLng(current));
+        setupZones();
     }
-
-    private LatLng translate(double lat, double lon, double metersX, double metersY) {
-        metersX /= 1000;
-        metersY /= 1000;
-        LatLng x = new LatLng(lat+(metersY/111.111), lon+(metersX/(111.111 * Math.cos(lat))));
-        Log.e("swabon", lat + " " + lon + " " + x.latitude + " " + x.longitude);
-        return x;
-    }
-
-
 
     private void setupZones() {
         //Get zones within a five mile radius, should be closer zones first
 
-        //currently example zones
-        List<Integer> types = new ArrayList<>();
-        types.add(0);
-        types.add(1);
-        if (!yy)
-            types.add(2);
 
-        List<CircleOptions> c = new ArrayList<>();
-        c.add(new CircleOptions().center(translate(l.getLatitude(),l.getLongitude(),100,100))
-                .radius(100));
-        c.add(new CircleOptions().center(translate(l.getLatitude(),l.getLongitude(),200,-200))
-                .radius(100));
-        if (!yy)
-            c.add(new CircleOptions().center(translate(l.getLatitude(),l.getLongitude(),-100,0)).radius(100));
-
-        for (int i = 0; i < c.size(); i++) {
-            createZone(types.get(i), c.get(i));
+        for (int i = 0; i < testZones.size(); i++) {
+            createZone(testZones.get(i));
         }
         if (checkSelfPermission(Manifest.permission.ACCESS_FINE_LOCATION) != PackageManager.PERMISSION_GRANTED) {
             return;
@@ -235,8 +249,8 @@ public class MainActivity extends AppCompatActivity implements OnMapReadyCallbac
         List<Integer> twos = new ArrayList<>();
         List<Integer> ones = new ArrayList<>();
         List<Integer> zeros = new ArrayList<>();
-        for (int i = 0; i < types.size(); i++) {
-            switch (types.get(i)) {
+        for (int i = 0; i < testZones.size(); i++) {
+            switch (testZones.get(i).type) {
                 case 2:
                     twos.add(i);
                     break;
@@ -251,11 +265,12 @@ public class MainActivity extends AppCompatActivity implements OnMapReadyCallbac
             }
         }
 
+
         boolean x = true;
         int type = 0;
-        for (int two : twos) { if (inside(c.get(two))) { type = 2; x = false; break; } }
-        for (int one : ones) { if (x && inside(c.get(one))) { type = 1; x =  false; break; } }
-        for (int zero : zeros) { if (x && inside(c.get(zero))) { type = 0; break; } }
+        for (int two : twos) { if (inside(testZones.get(two))) { type = 2; x = false; break; } }
+        for (int one : ones) { if (x && inside(testZones.get(one))) { type = 1; x =  false; break; } }
+        for (int zero : zeros) { if (x && inside(testZones.get(zero))) { type = 0; break; } }
 
         Log.e("Swabon", ""+type);
 
@@ -275,13 +290,15 @@ public class MainActivity extends AppCompatActivity implements OnMapReadyCallbac
                     break;
             }
 
-            sendNotification(text);
+            mService.updateNotification(text);
         }
+
+
     }
 
-    private void createZone(int type, CircleOptions o) {
+    private void createZone(Zone o) {
         int col;
-        switch (type) {
+        switch (o.type) {
             case 0:
                 col = Color.argb(100, 0, 255, 0);
                 break;
@@ -294,40 +311,77 @@ public class MainActivity extends AppCompatActivity implements OnMapReadyCallbac
             default:
                 col = Color.BLACK;
         }
-        mMap.addCircle(o.fillColor(col).strokeWidth(0));
+        mMap.addCircle(new CircleOptions().center(new LatLng(o.latitude, o.longitude))
+                .radius(o.radius).fillColor(col).strokeWidth(0));
     }
 
-    private boolean inside(CircleOptions centerPoint) {
+    private boolean inside(Zone o) {
+/*
+
         //radius is in meters and this function is in km
-        double rad = centerPoint.getRadius()/1000;
+        double rad = o.radius/1000;
 
         double ky = 40000 / 360;
-        double kx = Math.cos(Math.PI * centerPoint.getCenter().latitude / 180.0) * ky;
-        double dx = Math.abs(centerPoint.getCenter().longitude - l.getLongitude()) * kx;
-        double dy = Math.abs(centerPoint.getCenter().latitude - l.getLatitude()) * ky;
-        return Math.sqrt(dx * dx + dy * dy) <= rad;
+        double kx = Math.cos(Math.PI * o.latitude / 180.0) * ky;
+        double dx = Math.abs(o.longitude - l.getLongitude()) * kx;
+        double dy = Math.abs(o.latitude - l.getLatitude()) * ky;
+        return Math.sqrt(dx * dx + dy * dy) <= rad;*/
+
+        Location loc = new Location("");
+        loc.setLatitude(o.latitude);
+        loc.setLongitude(o.longitude);
+        return loc.distanceTo(l) <= o.radius;
     }
 
-    public void sendNotification(String text) {
-        // Create an explicit intent for an Activity in your app
-        Intent intent = new Intent(this, MainActivity.class);
-        intent.setFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_CLEAR_TASK);
-        PendingIntent pendingIntent = PendingIntent.getActivity(this, 0, intent, 0);
 
-        NotificationCompat.Builder builder = new NotificationCompat.Builder(this, "swabon_notifications_01")
-                .setSmallIcon(R.drawable.swabon)
-                .setContentTitle("New Zone")
-                .setContentText(text)
-                .setPriority(NotificationCompat.PRIORITY_DEFAULT)
-                // Set the intent that will fire when the user taps the notification
-                .setContentIntent(pendingIntent)
-                .setAutoCancel(true);
 
-        NotificationManagerCompat notificationManager = NotificationManagerCompat.from(this);
 
-        // notificationId is a unique int for each notification that you must define
-        notificationManager.notify(notificationId++, builder.build());
+    @Subscribe(threadMode = ThreadMode.MAIN)
+    public void onMessageEvent(LocationUpdateService.LocationUpdateEvent event) {
+        if (startUpdates) {
+            Log.e(TAG, "message received");
+            l = event.getLocation();
+            moveMap();
+        }
+    };
+
+    @Override
+    public void onStart() {
+        super.onStart();
+        Intent intent = new Intent(this, LocationUpdateService.class);
+        bindService(intent, connection, Context.BIND_AUTO_CREATE);
+        if (!EventBus.getDefault().isRegistered(this)) {
+            EventBus.getDefault().register(this);
+        }
     }
+
+    @Override
+    public void onDestroy() {
+        super.onDestroy();
+        unbindService(connection);
+        EventBus.getDefault().unregister(this);
+    }
+
+    private ServiceConnection connection = new ServiceConnection() {
+
+        @Override
+        public void onServiceConnected(ComponentName className,
+                                       IBinder service) {
+            // We've bound to LocalService, cast the IBinder and get LocalService instance
+            Log.e(TAG, "Service connected");
+            LocationUpdateService.LocationUpdateBinder binder = (LocationUpdateService.LocationUpdateBinder) service;
+            mService = binder.getService();
+        }
+
+        @Override
+        public void onServiceDisconnected(ComponentName arg0) {
+            Log.e(TAG, "Service disconnected");
+        }
+    };
+
+
+
+
 
     @Override
     public boolean onCreateOptionsMenu(Menu menu) {
@@ -352,7 +406,6 @@ public class MainActivity extends AppCompatActivity implements OnMapReadyCallbac
             case R.id.settings:
                 // User chose the "Favorite" action, mark the current item
                 // as a favorite...
-                yy = false;
 
 
                 return true;
@@ -365,73 +418,14 @@ public class MainActivity extends AppCompatActivity implements OnMapReadyCallbac
         }
     }
 
-    private void getCurrentLocation() {
-        locClient = LocationServices.getFusedLocationProviderClient(this);
-
-        locationCallback = new LocationCallback() {
-            @Override
-            public void onLocationResult(LocationResult locationResult) {
-                if (locationResult == null) {
-                    Log.e("Swabon", "No location from update");
-                    Toast.makeText(MainActivity.this, "No location from update", Toast.LENGTH_SHORT).show();
-                    return;
-                }
-                setLocation(locationResult.getLocations().get(0));
-            }
-        };
-
-        // Initialize the SDK
-        Places.initialize(getApplicationContext(), getString(R.string.google_maps_key));
-        // Create a new Places client instance
-        placesClient = Places.createClient(this);
-
-        LocationRequest locationRequest = LocationRequest.create();
-        locationRequest.setInterval(300000);
-        locationRequest.setFastestInterval(10000);
-        locationRequest.setPriority(LocationRequest.PRIORITY_HIGH_ACCURACY);
-        locClient.requestLocationUpdates(locationRequest,
-                locationCallback,
-                Looper.getMainLooper());
-
-        locClient.getLastLocation()
-                .addOnSuccessListener(this, new OnSuccessListener<Location>() {
-                    @Override
-                    public void onSuccess(Location location) {
-                        // Got last known location. In some rare situations this can be null.
-                        Log.e("Swabon", "No location");
-                        if (location != null) {
-                            // Logic to handle location object
-                            setLocation(location);
-                        }
-                    }
-                });
-
-
-
-        /*lm = (LocationManager)  this.getSystemService(Context.LOCATION_SERVICE);
-        Criteria criteria = new Criteria();
-        String bestProvider = String.valueOf(lm.getBestProvider(criteria, true)).toString();
-
-
-        //setMock(50.3714883, -4.132739, false);
-
-        //You can still do this if you like, you might get lucky:
-        Location loc = lm.getLastKnownLocation(bestProvider);
-        if (loc != null) {
-            setLocation(loc);
-        }
-        else{
-            lm.requestLocationUpdates(bestProvider, 1000, 0, this);
-        }*/
-    }
-
     @Override
     protected void onActivityResult(int requestCode, int resultCode, @Nullable Intent data) {
+        super.onActivityResult(requestCode, resultCode, data);
         if (requestCode == AUTOCOMPLETE_REQUEST_CODE) {
             if (resultCode == RESULT_OK) {
                 Place place = Autocomplete.getPlaceFromIntent(data);
                 Toast.makeText(this, "Place: " + place.getName() + ", " + place.getId(), Toast.LENGTH_LONG).show();
-                setLocation(place.getLatLng().latitude, place.getLatLng().longitude);
+                //setLocation(place.getLatLng().latitude, place.getLatLng().longitude);
             } else if (resultCode == AutocompleteActivity.RESULT_ERROR) {
                 // TODO: Handle the error.
                 Status status = Autocomplete.getStatusFromIntent(data);
@@ -442,22 +436,9 @@ public class MainActivity extends AppCompatActivity implements OnMapReadyCallbac
         }
     }
 
-    private void setLocation(Location loc) {
-        l = loc;
-        Log.e("swabon", "GPS is on");
-        Log.e("swabon", l.getLatitude() + " " + l.getLongitude());
 
-        moveMap(true);
-    }
 
-    private void setLocation(double lat, double lon) {
-        l.setLatitude(lat);
-        l.setLongitude(lon);
-        Log.e("swabon", "GPS is on");
-        Log.e("swabon", lat + " " + lon);
 
-        moveMap(true);
-    }
 
     /*private void setMock(double latitude, double longitude, boolean x) {
         lm.addTestProvider(LocationManager.GPS_PROVIDER,
@@ -500,3 +481,4 @@ public class MainActivity extends AppCompatActivity implements OnMapReadyCallbac
         moveMap(false);
     }*/
 }
+
